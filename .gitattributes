@@ -1,2 +1,2 @@
-NYCpopsizebyzip/*.csv linguist-documentation
-ratmaps/*.gif linguist-documentation
+$ cat .gitattributes
+*.md linguist-language=R
