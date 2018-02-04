@@ -3,4 +3,4 @@ In R, make an animated map or gif of NYC 311 data by zip code and month as well 
 
 Read a blog post with a summary of the results [here](https://towardsdatascience.com/new-yorkers-should-learn-to-get-along-with-rats-because-theyre-not-leaving-a-data-visualization-db4ca516762b).
 
-![](https://i.imgur.com/CZtG35a.gifv)
+![](https://i.imgur.com/CZtG35ab.gif)
