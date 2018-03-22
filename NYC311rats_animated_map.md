@@ -10,7 +10,7 @@ library(tidyverse)
 library(data.table)
 ```
 
-Previously downloaded [NYC 311 data on rat and mouse sightings](https://data.cityofnewyork.us/Social-Services/Rat-and-Mouse-Sightings/tyjc-9rwy?category=Social-Services&view_name=Rat-and-Mouse-Sightings)
+I previously downloaded [NYC 311 data on rat and mouse sightings](https://data.cityofnewyork.us/Social-Services/Rat-and-Mouse-Sightings/tyjc-9rwy?category=Social-Services&view_name=Rat-and-Mouse-Sightings) using filter criteria Descriptor = "Rat Sighting or Mouse Sighting".
 
 This results in a large data set with many variables not needed for this project. The data set was processed in R to retain 4 of 53 variables (Incident Zip, Created Date, Descriptor, Borough), change character variables to factor, remove spaces from variable names, filtered to remove mouse sightings, date changed to POSIXct format, and additional Year, Month, and Month\_Year variables created. Data were saved as RatData.rds and are in this Github repository.
 
