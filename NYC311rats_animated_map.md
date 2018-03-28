@@ -3,22 +3,88 @@ NYC311rats\_animated\_map
 Jenny
 1/12/2018
 
+New York City maintains an [open data portal](https://opendata.cityofnewyork.us) making data from many City agencies publicly available. If you're looking for a good dataset to use for practicing data manipulation, analysis, or visualization techniques, it is a gold mine. NYC’s 311 system takes calls or online complaints and questions about any non-emergency matter, all of which are available on the NYC Open Data website. NYC 311 has a rodent sighting category and rat sub-category, which I used for this project.
+
+You can read my Medium [blog post](https://towardsdatascience.com/new-yorkers-should-learn-to-get-along-with-rats-because-theyre-not-leaving-a-data-visualization-db4ca516762b) about rats in NYC and some of the factors that might contribute to seasonal changes and Borough or neighborhood differences in rat 311 reports.
+
 Load packages used
+
+You will also have to instal `ImageMagick` on your computer (not an R package) which is wrapped by `magick` for use in `R`. It took me a bit of time to figure this out. You might want to start [here](https://cran.r-project.org/web/packages/magick/vignettes/intro.html).
 
 ``` r
 library(tidyverse)
 library(data.table)
+library(janitor)
+library(ggplot2)
+library(gganimate)
+library(choroplethr)
+library(choroplethrZip)
+library(magick)
+library(filesstrings)
 ```
 
-Previously downloaded [NYC 311 data on rat and mouse sightings](https://data.cityofnewyork.us/Social-Services/Rat-and-Mouse-Sightings/tyjc-9rwy?category=Social-Services&view_name=Rat-and-Mouse-Sightings)
+You can use data stored in this [GitHub repository](https://github.com/JListman/NYC_311_animated_map) or you can download an updated version of 311 data from NYC Open Data.
 
-This results in a large data set with many variables not needed for this project. The data set was processed in R to retain 4 of 53 variables (Incident Zip, Created Date, Descriptor, Borough), change character variables to factor, remove spaces from variable names, filtered to remove mouse sightings, date changed to POSIXct format, and additional Year, Month, and Month\_Year variables created. Data were saved as RatData.rds and are in this Github repository.
+Download [NYC 311 data on rat and mouse sightings](https://data.cityofnewyork.us/Social-Services/Rat-and-Mouse-Sightings/tyjc-9rwy?category=Social-Services&view_name=Rat-and-Mouse-Sightings). I dowloaded data from January, 2010 through July, 2017 and saved it as `Rat_and_Mouse_Sightings.csv`.
 
-Read in RatData.rds and census data NYCpopsizebyzip.csv (also in this repository) for popoulation size by NYC zip code. Add population count (NYCpopsizebyzip$value) to RatData by matching zip codes. region variable in NYCpopsizebyzip must be changed from numeric to factor varialbe in order to use `base::merge`. Use `droplevels` to remove Incident\_Zip and Borough typos, NAs, or errors from NYC 311 database. Rename population count variable to be self-explanatory.
+This was read into R with `data.table::fread`, which is faster than `read.csv`.
 
 ``` r
-RatData <- readRDS("RatData.rds")
+RatMouseSightings <- fread("Rat_and_Mouse_Sightings.csv")
+```
 
+This results in a large data set with many variables not needed for this project.
+
+Look at the first few rows to understand the variables we have.
+
+``` r
+View(head(RatMouseSightings))
+```
+
+Make a smaller dataframe by removing unneeded columns keeping only "Created Date", "Descriptor","Incident Zip", and "Borough". Look at the first few rows again to make sure the correct variables were kept.
+
+``` r
+RatMouseData <- as.data.frame(RatMouseSightings[,c(2,7,9,25)])
+View(head(RatMouseData))
+```
+
+Remove the super large file from memory, since we're now working with a file that only contains 4 of the original 53 columns (variables).
+
+``` r
+rm(RatMouseSightings)
+```
+
+Fix the variable names to remove spaces using `janitor::clean_names`. Then turn multiple variables from character to factor, at the same time.
+
+``` r
+RatMouseData <- RatMouseData %>% clean_names()
+
+cols <- c("Descriptor", "Incident_Zip", "Borough")
+
+RatMouseData <- RatMouseData %>% mutate_at(cols, funs(factor(.)))
+```
+
+Make a new dataframe with the subset of rows for which Descriptor variable is "Rat Sighting".
+
+``` r
+RatData <- subset(RatMouseData, Descriptor == "Rat Sighting")
+```
+
+Turn "Created\_Date" variable, currently a string, into POSIXct date format. Then get Month, Year and Month\_Year variables because you might want any/all of those for exploratory analysis or plotting. Create them as factor variables instead of numeric or character. Save the dataframe of rat sighting data as a `.rds` file to preserve variable formatting for the next time you want to use it.
+
+``` r
+RatData <- RatData %>% 
+mutate(Created_Date = as.POSIXct(Created_Date, "%m/%d/%Y %I:%M:%S %p", tz="")) %>%
+mutate(Year = as.factor(year(RatData$Created_Date))) %>%
+mutate(Month = as.factor(month(RatData$Created_Date))) %>%
+mutate(Month_Year = as.factor(format(RatData$Created_Date, "%Y-%m")))
+
+saveRDS(RatData, "RatData.rds")
+```
+
+Read in census data NYCpopsizebyzip.csv (found in this [GitHub repository](https://github.com/JListman/NYC_311_animated_map) associated with the project) for popoulation size by NYC zip code. Add population count (`NYCpopsizebyzip$value`) to `RatData` by matching zip codes. `region` variable in `NYCpopsizebyzip` must be changed from numeric to factor in order to use `base::merge`. Use `droplevels` to remove `Incident_Zip` and `Borough` typos, NAs, or errors from NYC 311 database. Rename `value` (population count variable from `NYCpopsizebyzip`) to be self-explanatory.
+
+``` r
 NYCpopsizebyzip <- read.csv("NYCpopsizebyzip.csv", header=TRUE)
 
 NYCpopsizebyzip$region <- as.factor(NYCpopsizebyzip$region)
@@ -29,7 +95,7 @@ RatData <- RatData %>%
         droplevels()
 ```
 
-Make a tidy Zip dataframe including new variable of calls per Month\_Year by zip code with `dplyr::count`. Rename the newly created variable to be self-explanatory.
+Make a tidy Zip dataframe including new variable of calls per Month\_Year by zip code with `dplyr::count`. Rename the newly created variable (automatically named `n` by `dplyr::count` default) to be self-explanatory.
 
 ``` r
 TidyRatDataZip <- RatData %>% 
@@ -37,11 +103,11 @@ TidyRatDataZip <- RatData %>%
         rename("count_calls_Zip" = n)
 ```
 
-For mapping with `choroplethrZip`, factor variable must be named "value" and needs labels for legend. Zip needs to be named "region" for choroplethrZip.
+For mapping with `choroplethrZip`, Zip needs to be named "region" and the mapped factor variable must be named "value" and needs labels for the legend to make sense.
 
-For mapping, it can be more useful to compare relative instead of absolute counts across regions. Make new variables based on rat reports per population count. First make a numeric variable of rat reports per zip code population size, then bin it to create a factor variable which will be used as the mapped "value" in `choroplethrZip`.
+It can be more useful to compare relative instead of absolute counts across regions, when making a map data visualization. Make new variables based on rat reports per population count per region. First make a numeric variable of rat reports per zip code population size, then bin it to create a factor variable which will be used as the mapped "value" in `choroplethrZip`.
 
-Visually inspect the distribution of the factor variable to be mapped onto zip codes by printing a table.
+To come up with reasonable `breaks` for the bins using the base R function `cut`, look at the distribution of the variable you want to map. Visually inspect the distribution of the factor variable to be mapped onto zip codes by printing a table. I had to change break values a couple of times before I was happy with the results. I then used `label` to make the bins appear in the map legend in a readable manner. Default labels can be ugly.
 
 ``` r
 TidyRatDataZip <-  TidyRatDataZip %>%
@@ -54,15 +120,9 @@ TidyRatDataZip <-  TidyRatDataZip %>%
 table(TidyRatDataZip$value)
 ```
 
-    ## 
-    ##   0.09-0.35   0.35-0.55   0.55-0.80   0.80-1.10   1.10-1.50   1.50-2.00 
-    ##        1721        1651        1605        1603        1751        1610 
-    ##   2.00-3.00  3.00-10.00 10.00-41.00 
-    ##        1791        1476          57
-
 Make a smoothed line plot of median call density per Month\_Year across all zips within each Borough to show seasonality.
 
-Create new data frame with Month\_Year in proper order for plotting & create median variable.
+First, create a new data frame with Month\_Year in proper chronological order for plotting & create a new variable. I used median number of rat reports per 10,000 residents rather than mean because the distribution was quite skewed.
 
 ``` r
 RatCallsByBoroughMedian <- RatData %>% 
@@ -73,7 +133,7 @@ RatCallsByBoroughMedian <- RatData %>%
         summarize(MedianMonthYearReportPer10K = median(ReportPer10K))
 ```
 
-Create a dummy variable, "Order", to make plotting the x-axis easier. "Order" is a number from 1 to 92, which is the number of levels for the factor variable "Month\_Year". Change names of "Order" variable manually for x-axis using only January and July so x-axis is readable instead of crowded and seasonality is visible. The `\n` within each xlabel makes them print on two lines instead of a single, unreadable line.
+Create a dummy variable, "Order", to make plotting the x-axis easier. "Order" is a number from 1 to 92, which is the number of levels for the factor variable "Month\_Year". If you download your data from NYC Open Data rather than using my older data set, you'll have a different number of levels for this variable and will have to adjust the code, accordingly. Change names of "Order" variable manually for x-axis using only January and July so x-axis is readable instead of crowded and seasonality is visible. The `\n` within each xlabel makes them print on two lines instead of a single, unreadable line. Again, I downloaded the data in July, 2017. If you do a new download now, instead of using my stored data, you'll need to deal with Month\_Year levels that are not addressed in my code.
 
 ``` r
 RatCallsByBoroughMedian$Order <- seq_along(1:92) 
@@ -82,7 +142,9 @@ xlabels <- c("Jan \n2010","July \n2010","Jan \n2011","July \n2011","Jan \n2012",
             "Jan \n2015","July \n2015","Jan \n2016","July \n2016","Jan \n2017","July \n2017")
 ```
 
-Make lineplot graph
+Make a lineplot graph using `ggplot::geom_smooth`. This also took some fiddling with the parameters of the smoothing function to make it look reasonable. I used `theme_minimal` to get rid of lots of distracting lines and then used `geom_vline` to re-insert vertical lines only at January & July axis ticks for a cleaner look.
+
+You can add a `caption` for the graph, with your Twitter handle or website and the data source, so if someone posts the image, everyone gets credit.
 
 ``` r
 RatCallsByMonthBorough <- ggplot(RatCallsByBoroughMedian,aes(Order, MedianMonthYearReportPer10K)) +
@@ -94,8 +156,8 @@ RatCallsByMonthBorough <- ggplot(RatCallsByBoroughMedian,aes(Order, MedianMonthY
         labs(title="Rat Complaints to NYC's 311 By Borough: 2010-2017\n", 
              caption="@jblistman. Data source: NYC Open Data 311 Service Requests") +
         scale_y_continuous(breaks=c(0,1,2,3), labels= c("0","1","2","3")) +
-        geom_vline(xintercept=seq(1,92,by=6), colour='gray') + ## used theme_minimal to get rid of lots of lines - geom_vline will re-insert vertical lines only at January & July axis ticks for a cleaner look
-        scale_x_continuous(breaks=seq(1,92,by=6),labels=xlabels) + ## label only Jan & July axis ticks for a cleaner look
+        geom_vline(xintercept=seq(1,92,by=6), colour='gray') + 
+        scale_x_continuous(breaks=seq(1,92,by=6),labels=xlabels) +
         theme(axis.text.x=element_text(size = 13), 
               axis.text.y=element_text(size = 13),
               axis.title.x=element_text (size = 14),
@@ -107,27 +169,16 @@ RatCallsByMonthBorough <- ggplot(RatCallsByBoroughMedian,aes(Order, MedianMonthY
 RatCallsByMonthBorough
 ```
 
-![](NYC311rats_animated_map_files/figure-markdown_github-ascii_identifiers/make_lineplot-1.png)
+![](NYC311rats_animated_map_files/figure-markdown_github/make_lineplot-1.png)
 
-Load packages needed for mapping and gif
-
-``` r
-library(gganimate)
-library(choroplethr)
-library(choroplethrZip)
-library(magick)
-library(filesstrings)
-```
-
-Make dataframe with variables needed for map
+Make a dataframe with the subset of variables needed for the map.
 
 ``` r
 TidyRatMapData <- TidyRatDataZip[,c(3,4,6,7)]
 ```
 
-Create objects and order variables needed for maps. 1. Month\_Year as list in chronologicall order.
-2. Make vector of color-blind friendly map color palette derived from [colorbrewer website](http://colorbrewer2.org/#type=sequential&scheme=YlGnBu&n=9) for 9 factor levels of "value".
-3. Make vector of NYC zip codes instead of using nyc\_fips because county fips codes include some census zcta (close to zip codes, but not exactly) that include Long Island, which is *definitely* not part of NYC.
+Create objects and order variables needed for maps. 1. Month\_Year as list in chronologicall order with `base::sort`. Combine the sort with `base::unique` to get rid of duplicate Month\_Year levels because each zip has an entry for each Month\_Year.
+2. Make vector of Hex color codes in a color-blind friendly map color palette derived from the [colorbrewer website](http://colorbrewer2.org/#type=sequential&scheme=YlGnBu&n=9) for 9 factor levels of "value". I chose a diverging palette to emphasize the highs and lows. You can play around with this. 3. Make a vector of NYC zip codes instead of using nyc\_fips (in the Census data set that we merged earlier to get population size) because county fips codes include some census zcta (close to zip codes, but not exactly) that include Long Island, which is *definitely* not part of NYC.
 
 ``` r
 datesRats <- sort(unique(TidyRatMapData$Month_Year))
@@ -135,10 +186,10 @@ mapcolors <- c('#ffffd9','#edf8b1','#c7e9b4','#7fcdbb','#41b6c4','#1d91c0','#225
 nyc_zips <- NYCpopsizebyzip$region
 ```
 
-Make maps using `zip_choropleth` which uses `ggplot2` to make map objects and then `choroplethr_animate` to write map png files.
+Make maps using `zip_choropleth` which uses `ggplot2` to make map objects and then `choroplethr_animate` to write png files of each map image.
 These pngs can be used as-is with `choroplethr_animate` which creates code along with the pngs to make a link to animated maps or they can be turned into a gif with `magick`.
 
-For each Month\_Year create a map. This code was adapted from a [tutorial by Kimberly Coffey](http://www.kimberlycoffey.com/blog/2015/10/17/animated-choropleth-map-for-the-web).
+For each Month\_Year create a map. This code was adapted from a [tutorial by Kimberly Coffey](http://www.kimberlycoffey.com/blog/2015/10/17/animated-choropleth-map-for-the-web). In `scale_fill_manual` and `guides`, override the vector of color codes that correspond to binned values so that zip codes with no rat complaints for a given month are colored gray.
 
 ``` r
 RatMapsAnimate <- list()
@@ -157,7 +208,7 @@ RatMapsAnimate[[i]] = zip_choropleth(df, zip_zoom = nyc_zips, title=title, refer
 } 
 ```
 
-Write a png image for each map plus a file with html code to combine pngs as an animation. The animation can be viewed in a browser, but we'll also turn the pngs into a gif.
+Use `choroplethr_animate` to write a png image for each map plus a file with html code to combine pngs as an animation. The animation can be viewed in a browser, but we'll also turn the pngs into a gif.
 
 ``` r
 choroplethr_animate(RatMapsAnimate)
@@ -165,19 +216,19 @@ choroplethr_animate(RatMapsAnimate)
 
 `choroplethr_animate` creates files with numerical names that are out of order, alphabetically. Rename files choropleth\_1.png ... choropleth\_9.png to choropleth\_01.png ... choropleth\_09.png so when they are automatically turned into a gif with `magick`, they are ordered alphabetically as well as numerically.
 
-`filestrings::nice_file_nums` will do this automatically for an entire directory. The current working directory already contains the .png files that need to be renamed.
+`filestrings::nice_file_nums` will do this automatically for an entire directory. The current working directory already contains the png files that need to be renamed.
 
 ``` r
 nice_file_nums(dir = ".", pattern = ".png")
 ```
 
-Convert the .png files to a .gif with ImageMagick. If you've moved the .png files, change directory before running the following code. I've named the resulting file ratmaps.gif and chose a delay of 40 between frames. Play with the delay depending on your preferences for time between frames and name your own file. `system()` executes code as if you're using the terminal.
+Convert the .png files to a .gif with `ImageMagick`. First, change your working directory to the folder in which you've written the png files. I've named the resulting file ratmaps.gif and chose a delay of 40 between frames. Play with the delay depending on your preferences for time between frames and name your own file (or keep ratmaps, whichever). `system()` executes code as if you're using the terminal.
 
 ``` r
 system("convert -delay 40 *.png ratmaps.gif")
 ```
 
-If you don't want to save all the gigantic .png files, remove them from the directory.
+If you don't want to save all the gigantic .png files, remove them from the working directory.
 
 ``` r
 file.remove(list.files(pattern=".png"))
